@@ -9,11 +9,12 @@ import getpass
 import hashlib
 import sqlite3
 
-SERVERCONFIG = "production.ini"
-AUTHDBPATH = "auth.db"
-PIDPATH = "/tmp/ankiserver.pid"
-COLLECTIONPATH = "collections/"
+SERVERCONFIG = "production.ini" # 默认的服务配置文件
+AUTHDBPATH = "auth.db"          # 记录用户名和密码的数据库
+PIDPATH = "/tmp/ankiserver.pid" # 存放已经启动的后台服务进程id
+COLLECTIONPATH = "collections/" # 存放所有用户数据的目录
 
+#使用帮助
 def usage():
     print "usage: "+sys.argv[0]+" <command> [<args>]"
     print
@@ -26,6 +27,13 @@ def usage():
     print "  lsuser             - list users"
     print "  passwd <username>  - change password of a user"
 
+#启动服务
+# 执行paster server configpath启动一个python基于的WSGI结构的Web服务器
+# 使用时需要以example.ini为模板复制成production.ini做为configpath。
+# debug: false表示启动一个后台进程来运行服务。true表示在前台运行
+#        在后台执行时会将台台进程的pid记录在PIDPATH文件，关闭
+#        服务时会从这个文件中读回进程pid，并kill进程。
+# configpath：传递给命令的配置文件路径
 def startsrv(configpath, debug):
     if not configpath:
         configpath = SERVERCONFIG
@@ -50,6 +58,8 @@ def startsrv(configpath, debug):
     with open(PIDPATH, "w") as pidfile:
         pidfile.write(str(pid))
 
+#停止服务
+# 从PIDPATH文件中读回startsrv创建的后台进程pid，并kill进程。
 def stopsrv():
     if os.path.isfile(PIDPATH):
         try:
@@ -63,6 +73,8 @@ def stopsrv():
     else:
         print >>sys.stderr, sys.argv[0]+": The server is not running"
 
+#增加一个新的用户
+# 向AUTHDBPATH数据库中插入一条用户记录。并创建存放用户数据目录
 def adduser(username):
     if username:
         print "Enter password for "+username+": "
@@ -87,6 +99,8 @@ def adduser(username):
     else:
         usage()
 
+#删除用户
+# 从用户数据库中删除用户记录，用户数据目录中的文件不会删除。
 def deluser(username):
     if username and os.path.isfile(AUTHDBPATH):
             conn = sqlite3.connect(AUTHDBPATH)
@@ -101,6 +115,8 @@ def deluser(username):
     else:
         print >>sys.stderr, sys.argv[0]+": Database file does not exist"
 
+#列出用户
+# 列出数据库中的所有用户记录。
 def lsuser():
     conn = sqlite3.connect(AUTHDBPATH)
     cursor = conn.cursor()
@@ -116,6 +132,7 @@ def lsuser():
 
     conn.close()
 
+#修改用户密码
 def passwd(username):
     if os.path.isfile(AUTHDBPATH):
         print "Enter password for "+username+": "
@@ -134,6 +151,7 @@ def passwd(username):
     else:
         print >>sys.stderr, sys.argv[0]+": Database file does not exist"
 
+#根据命令行参数执行相应的功能。
 def main():
     argc = len(sys.argv)
     exitcode = 0
@@ -165,5 +183,6 @@ def main():
 
     sys.exit(exitcode)
 
+#入口
 if __name__ == "__main__":
     main()

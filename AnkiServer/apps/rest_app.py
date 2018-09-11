@@ -37,6 +37,7 @@ from anki.utils import intTime
 
 import AnkiServer
 
+#要公开给外部使用的接口
 __all__ = ['RestApp', 'RestHandlerBase', 'noReturnValue']
 
 def noReturnValue(func):
@@ -89,6 +90,11 @@ class RestApp(object):
         else:
             self.collection_manager = getCollectionManager()
 
+        #这里初始化handlers{}属性
+        # handlers[type][name] = handler
+        # type是数据类型，有collection,note,model,deck,card可选
+        # name是接口的名字
+        # handler是接口的入口，可调用。
         self.handlers = {}
         for type_list in self.handler_types:
             if type(type_list) is not list:
@@ -141,12 +147,18 @@ class RestApp(object):
         if hasReturnValue:
             return ret
 
+    #列出所有的collection记忆库。
     def list_collections(self):
         """Returns an array of valid collection names in our self.data_path."""
+        #列表推导式
+        #列出data_root下所有的子目录，并且子目录里有collection.anki2这文件。
         return [x for x in os.listdir(self.data_root) if os.path.exists(os.path.join(self.data_root, x, 'collection.anki2'))]
 
+    #检查请求是否有效。
     def _checkRequest(self, req):
         """Raises an exception if the request isn't allowed or valid for some reason."""
+        
+        #请求的发出地址是否在白名单内
         if self.allowed_hosts != '*':
             try:
                 remote_addr = req.headers['X-Forwarded-For']
@@ -154,13 +166,20 @@ class RestApp(object):
                 remote_addr = req.remote_addr
             if remote_addr != self.allowed_hosts:
                 raise HTTPForbidden()
-        
+
+        #只能以GET方式访问根路径，其它路径只能以POST方式。
         if req.path == '/':
             if req.method != 'GET':
                 raise HTTPMethodNotAllowed(allow=['GET'])
         elif req.method != 'POST':
             raise HTTPMethodNotAllowed(allow=['POST'])
 
+    #分析路径，路径的格式为 type/id/type/id.../name
+    # 例如：collection/1/deck/2/name
+    # 表示对collection 1中的deck 2执行名字为name的操作，
+    # 如果操作名为空默认为index操作。
+    # type/id对可以有一对或多对。
+    # 返回(handler_type, name, ids)，也就是(最后一个type，操作名，id列表)。
     def _parsePath(self, path):
         """Takes a request path and returns a tuple containing the handler type, name
         and a list of ids.
@@ -210,6 +229,7 @@ class RestApp(object):
 
         return (handler_type, name, ids)
 
+    # 根据记忆库id获取记忆库的文件路径，id为用户名。
     def _getCollectionPath(self, collection_id):
         """Returns the path to the collection based on the collection_id from the request.
         
@@ -222,6 +242,7 @@ class RestApp(object):
 
         return path
 
+    #返回对type数据的名字为name的操作的接口
     def _getHandler(self, type, name):
         """Returns a tuple containing handler function for this type and name, and a boolean flag
         if that handler has a return value.
@@ -241,6 +262,7 @@ class RestApp(object):
 
         return (handler, hasReturnValue)
 
+    #将请求数据(JSON格式)转成Python的字典数据返回。
     def _parseRequestBody(self, req):
         """Parses the request body (JSON) into a Python dict and returns it.
 
@@ -269,11 +291,14 @@ class RestApp(object):
             self.hook_post_execute(col, req, result)
         return result
 
+    #@wsgi装饰器，作用是将一个函数转换成一个WSGI应用。
     @wsgify
     def __call__(self, req):
         # make sure the request is valid
         self._checkRequest(req)
 
+        # "/" 返回版本号
+        # "/list_collections" 列出所有记录库
         # special non-collection paths
         if req.path == '/':
             return Response('AnkiServer ' + str(AnkiServer.__version__), content_type='text/plain')
@@ -293,6 +318,8 @@ class RestApp(object):
         # parse the request body
         data = self._parseRequestBody(req)
 
+        # 获取用户的session数据，ids[0]中存放的是记忆库的id，也就是用户id。
+        # 一个用户一个记忆库。
         # get the users session
         try:
             session = self.sessions[ids[0]]
@@ -305,6 +332,7 @@ class RestApp(object):
 
         # run it!
         try:
+            #根据记忆库的路径获取记忆库，
             col = self.collection_manager.get_collection(collection_path, self.setup_new_collection)
             handler_request = RestHandlerRequest(self, data, ids, session)
             output = col.execute(self._execute_handler, [handler_request, handler], {}, hasReturnValue)
@@ -320,6 +348,9 @@ class RestApp(object):
         else:
             return Response(json.dumps(output), content_type='application/json')
 
+#记忆库的操作
+#每一个Collection记忆库对应用户数据目录下面的collection.anki2文件
+#记忆库中保存了笔记类型和笔记
 class CollectionHandler(RestHandlerBase):
     """Default handler group for 'collection' type."""
     
@@ -327,10 +358,12 @@ class CollectionHandler(RestHandlerBase):
     # MODELS - Store fields definitions and templates for notes
     #
 
+    #列出所以的笔记类型
     def list_models(self, col, req):
         # This is already a list of dicts, so it doesn't need to be serialized
         return col.models.all()
 
+    #获取指定名字的笔记类型
     def find_model_by_name(self, col, req):
         # This is already a list of dicts, so it doesn't need to be serialized
         return col.models.byName(req.data['model'])
@@ -340,6 +373,7 @@ class CollectionHandler(RestHandlerBase):
     #         (based on a template from the model).
     #
 
+    #获取笔记
     def find_notes(self, col, req):
         query = req.data.get('query', '')
         ids = col.findNotes(query)
@@ -369,6 +403,7 @@ class CollectionHandler(RestHandlerBase):
 
         return notes
 
+    #添加一条笔记
     @noReturnValue
     def add_note(self, col, req):
         from anki.notes import Note
@@ -389,6 +424,7 @@ class CollectionHandler(RestHandlerBase):
 
         col.addNote(note)
 
+    #列出所有标签
     def list_tags(self, col, req):
         return col.tags.all()
 
@@ -396,10 +432,12 @@ class CollectionHandler(RestHandlerBase):
     # DECKS - Groups of cards
     #
 
+    #列出所有牌组
     def list_decks(self, col, req):
         # This is already a list of dicts, so it doesn't need to be serialized
         return col.decks.all()
 
+    #选择牌组
     @noReturnValue
     def select_deck(self, col, req):
         deck = DeckHandler._get_deck(col, req.data['deck'])
@@ -411,6 +449,7 @@ class CollectionHandler(RestHandlerBase):
         'due': anki.consts.DYN_DUE,
     }
 
+    #创建动态牌组
     def create_dynamic_deck(self, col, req):
         name = req.data.get('name', t('Custom Study Session'))
         deck = col.decks.byName(name)
@@ -448,6 +487,7 @@ class CollectionHandler(RestHandlerBase):
 
         return deck
 
+    #清空动态牌组
     def empty_dynamic_deck(self, col, req):
         name = req.data.get('name', t('Custom Study Session'))
         deck = col.decks.byName(name)
@@ -504,6 +544,7 @@ class CollectionHandler(RestHandlerBase):
 
     #
     # SCHEDULER - Controls card review, ie. intervals, what cards are due, answering a card, etc.
+    # 排期器：控制卡的复习，如间隔，哪些卡到期了，回答一张卡，等等。
     #
 
     def reset_scheduler(self, col, req):
@@ -546,6 +587,8 @@ class CollectionHandler(RestHandlerBase):
           'string_interval': col.sched.nextIvlStr(card, ease),
         } for ease, label in enumerate(l, 1)]
 
+    #获取要复习的下一张卡
+    #从指定的牌组中选择一张到期要复习的卡，返加卡和这个卡的对应的回答按钮（从Again到Easy）
     def next_card(self, col, req):
         if req.data.has_key('deck'):
             deck = DeckHandler._get_deck(col, req.data['deck'])
@@ -571,6 +614,7 @@ class CollectionHandler(RestHandlerBase):
     #       be an error! This can happen after a collection has been closed
     #       for inactivity, and opened later. But since we're using
     #       @noReturnValue, no error will be passed up. :-/ What to do?
+    #回答一张卡，也就是用户点了回答按钮（从Again到Easy）。
     @noReturnValue
     def answer_card(self, col, req):
         import time
@@ -586,16 +630,19 @@ class CollectionHandler(RestHandlerBase):
 
         col.sched.answerCard(card, ease)
 
+    #卡暂停
     @noReturnValue
     def suspend_cards(self, col, req):
         card_ids = req.data['ids']
         col.sched.suspendCards(card_ids)
 
+    #取消卡暂停
     @noReturnValue
     def unsuspend_cards(self, col, req):
         card_ids = req.data['ids']
         col.sched.unsuspendCards(card_ids)
 
+    #卡最近回答的难度
     def cards_recent_ease(self, col, req):
         """Returns the most recent ease for each card."""
 
@@ -613,6 +660,7 @@ class CollectionHandler(RestHandlerBase):
 
         return result
 
+    #返回最近的复习记录
     def latest_revlog(self, col, req):
         """Returns recent entries from the revlog."""
 
@@ -651,6 +699,7 @@ class CollectionHandler(RestHandlerBase):
     }
     stats_reports_order = ['today', 'due', 'reps', 'interval', 'hourly', 'ease', 'card', 'footer']
 
+    #返回报告
     def stats_report(self, col, req):
         import anki.stats
         import re
@@ -699,10 +748,12 @@ class CollectionHandler(RestHandlerBase):
     # GLOBAL / MISC
     #
 
+    #设置语言
     @noReturnValue
     def set_language(self, col, req):
         anki.lang.setLang(req.data['code'])
 
+#导入
 class ImportExportHandler(RestHandlerBase):
     """Handler group for the 'collection' type, but it's not added by default."""
 
@@ -754,15 +805,22 @@ class ImportExportHandler(RestHandlerBase):
             if path is not None:
                 os.unlink(path)
 
+#笔记类型的操作
+#一个笔记类型model包括了1-n个字段和1-n个卡片模板
+#一个卡片模板有正反两面，将字段中的数据以不同的形式展现出来。
 class ModelHandler(RestHandlerBase):
     """Default handler group for 'model' type."""
 
+    #返回笔记类型的字段
     def field_names(self, col, req):
         model = col.models.get(req.ids[1])
         if model is None:
             raise HTTPNotFound()
         return col.models.fieldNames(model)
 
+#笔记的操作
+#每一个笔记note都属于某一个笔记类型model。
+#所以一个笔记note根据它的笔记类型model，可以展示成多张卡片card
 class NoteHandler(RestHandlerBase):
     """Default handler group for 'note' type."""
 
@@ -788,10 +846,12 @@ class NoteHandler(RestHandlerBase):
 
         return d
 
+    #索引
     def index(self, col, req):
         note = col.getNote(req.ids[1])
         return self._serialize(note)
 
+    #修改
     def update(self, col, req):
         note = col.getNote(req.ids[1])
         if note:
@@ -812,9 +872,11 @@ class NoteHandler(RestHandlerBase):
 
             note.flush(mod)
 
+    #删除
     def delete(self, col, req):
         col.remNotes([req.ids[1]])
 
+    #添加标签
     @noReturnValue
     def add_tags(self, col, req):
         note = col.getNote(req.ids[1])
@@ -832,6 +894,7 @@ class NoteHandler(RestHandlerBase):
 
         note.flush(mod)
 
+    #删除标签
     @noReturnValue
     def remove_tags(self, col, req):
         note = col.getNote(req.ids[1])
@@ -849,6 +912,7 @@ class NoteHandler(RestHandlerBase):
 
         note.flush(mod)
 
+#牌组的操作
 class DeckHandler(RestHandlerBase):
     """Default handler group for 'deck' type."""
 
@@ -865,9 +929,11 @@ class DeckHandler(RestHandlerBase):
 
         return deck
 
+    #索引
     def index(self, col, req):
         return self._get_deck(col, req.ids[1])
     
+    #获取这个牌组下一张要复习的卡片。
     def next_card(self, col, req):
         req_copy = req.copy()
         req_copy.data['deck'] = req.ids[1]
@@ -876,10 +942,12 @@ class DeckHandler(RestHandlerBase):
         # forward this to the CollectionHandler
         return req.app.execute_handler('collection', 'next_card', col, req_copy)
 
+    #获取配置
     def get_conf(self, col, req):
         # TODO: should probably live in a ConfHandler
         return col.decks.confForDid(req.ids[1])
 
+    #修改配置
     @noReturnValue
     def set_update_conf(self, col, req):
         data = req.data.copy()
@@ -891,6 +959,7 @@ class DeckHandler(RestHandlerBase):
 
         col.decks.updateConf(conf)
 
+#卡片的操作
 class CardHandler(RestHandlerBase):
     """Default handler group for 'card' type."""
 
@@ -937,6 +1006,7 @@ class CardHandler(RestHandlerBase):
         if r:
             return {'id': r[0], 'ease': r[1], 'timestamp': int(r[0] / 1000)}
 
+    #索引
     def index(self, col, req):
         card = col.getCard(req.ids[1])
         return self._serialize(card, req.data)
@@ -949,18 +1019,22 @@ class CardHandler(RestHandlerBase):
 
         return req.app.execute_handler('note', name, col, req)
 
+    #添加标签
     @noReturnValue
     def add_tags(self, col, req):
         self._forward_to_note(col, req, 'add_tags')
 
+    #删除标签
     @noReturnValue
     def remove_tags(self, col, req):
         self._forward_to_note(col, req, 'remove_tags')
 
+    #状态报告
     def stats_report(self, col, req):
         card = col.getCard(req.ids[1])
         return col.cardStats(card)
 
+    #最近的复习记录
     def latest_revlog(self, col, req):
         return self._latest_revlog(col, req.ids[1])
 

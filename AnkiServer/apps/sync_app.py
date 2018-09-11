@@ -780,4 +780,6 @@ def main():
     finally:
         shutdown()
 
+#Make a script both importable and executable
+#让脚本模块既可以导入到别的模块中用，另外该模块自己也可执行。
 if __name__ == '__main__': main()
