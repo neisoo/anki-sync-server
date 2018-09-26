@@ -22,6 +22,9 @@ import os, errno
 
 __all__ = ['CollectionWrapper', 'CollectionManager']
 
+# collection的封装类，封装anki.storage.Collection对象。
+# 根据路径，实现collection的打开（新建），创建，执行操作。
+# 执行操作时不用关心其是否已经打开或关闭。
 class CollectionWrapper(object):
     """A simple wrapper around an anki.storage.Collection object.
 
@@ -109,6 +112,9 @@ class CollectionWrapper(object):
         """Returns True if the collection is open, False otherwise."""
         return self.__col is not None
 
+# collection管理类
+# 维护一个collection实例的数组，访问过的collection都放到这个数组中。
+# 通过path取到对应的collection。对collection操作时不用关心collection是否已经打开。
 class CollectionManager(object):
     """Manages a set of CollectionWrapper objects."""
 

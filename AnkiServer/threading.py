@@ -29,6 +29,7 @@ import time, logging
 
 __all__ = ['ThreadingCollectionWrapper', 'ThreadingCollectionManager']
 
+#线程版本的CollectionWrapper
 class ThreadingCollectionWrapper(object):
     """Provides the same interface as CollectionWrapper, but it creates a new Thread to 
     interact with the collection."""
@@ -48,6 +49,7 @@ class ThreadingCollectionWrapper(object):
     def running(self):
         return self._running
 
+    # 清空操作队列
     def qempty(self):
         return self._queue.empty()
 
@@ -63,6 +65,9 @@ class ThreadingCollectionWrapper(object):
         immediately and the function will be executed sometime later.
         """
 
+        # 将操作放入操作队列中
+        # 如果是要立即返回结果的，则等待结果队列中有数据后（线程执行完操作后
+        # 会将结果放入结果队列中），取回并返回结果。
         if waitForReturn:
             return_queue = Queue()
         else:
@@ -76,21 +81,26 @@ class ThreadingCollectionWrapper(object):
                 raise ret
             return ret
 
+    # 线程，反复从操作队列中取出操作，执行，结果放入结果队列。
     def _run(self):
         logging.info('CollectionThread[%s]: Starting...', self.path)
 
         try:
             while self._running:
+                #从操作队列中取出一个操作
                 func, args, kw, return_queue = self._queue.get(True)
 
+                # 检查是否提供了这种操作
                 if hasattr(func, 'func_name'):
                     func_name = func.func_name
                 else:
                     func_name = func.__class__.__name__
 
+                # 更新最后一次执行操作的时间戳
                 logging.info('CollectionThread[%s]: Running %s(*%s, **%s)', self.path, func_name, repr(args), repr(kw))
                 self.last_timestamp = time.time()
 
+                # 执行操作
                 try:
                     ret = self.wrapper.execute(func, args, kw, return_queue)
                 except Exception, e:
@@ -99,6 +109,7 @@ class ThreadingCollectionWrapper(object):
                     # we return the Exception which will be raise'd on the other end
                     ret = e
 
+                # 执行结果放入返回队列中
                 if return_queue is not None:
                     return_queue.put(ret)
         except Exception, e:
@@ -112,6 +123,7 @@ class ThreadingCollectionWrapper(object):
 
             logging.info('CollectionThread[%s]: Stopped!', self.path)
 
+    # 启动线程
     def start(self):
         if not self._running:
             self._running = True
@@ -119,11 +131,13 @@ class ThreadingCollectionWrapper(object):
             self._thread = Thread(target=self._run)
             self._thread.start()
 
+    # 停止线程：当成操作来执行，让线程自己结束运行
     def stop(self):
         def _stop(col):
             self._running = False
         self.execute(_stop, waitForReturn=False)
 
+    # 停止并等待线程结束
     def stop_and_wait(self):
         """ Tell the thread to stop and wait for it to happen. """
         self.stop()
@@ -148,9 +162,14 @@ class ThreadingCollectionWrapper(object):
     def opened(self):
         return self.wrapper.opened()
 
+# 线程版本CollectionManager
+# 启动一个线程，定时检测所有collection，当发现某个collection长时间没有操作时，就关闭它。
+# 这样做应该是为了节省资源。
 class ThreadingCollectionManager(CollectionManager):
     """Manages a set of ThreadingCollectionWrapper objects."""
 
+    #collection_wrapper相比CollectionManager父类中替换成了ThreadingCollectionWrapper，
+    #那么collections数组中创建的都是ThreadingCollectionWrapper。
     collection_wrapper = ThreadingCollectionWrapper
 
     def __init__(self):

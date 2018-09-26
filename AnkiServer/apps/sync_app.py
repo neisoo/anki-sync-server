@@ -276,6 +276,7 @@ class SyncMediaHandler(MediaSyncer):
 
         return json.dumps({'data':result, 'err':''})
 
+# 用户同步数据时使用的上下文
 class SyncUserSession(object):
     def __init__(self, name, path, collection_manager, setup_new_collection=None):
         import time
@@ -301,6 +302,7 @@ class SyncUserSession(object):
     def get_collection_path(self):
         return os.path.realpath(os.path.join(self.path, 'collection.anki2'))
 
+    # 获取用户对应的collection，这里得到的是ThreadingCollectionWrapper。
     def get_thread(self):
         return self.collection_manager.get_collection(self.get_collection_path(), self.setup_new_collection)
 
@@ -360,6 +362,7 @@ class SimpleUserManager(object):
 class SyncApp(object):
     valid_urls = SyncCollectionHandler.operations + SyncMediaHandler.operations + ['hostKey', 'upload', 'download', 'getDecks']
 
+    #构造函数，获取参数。
     def __init__(self, **kw):
         from AnkiServer.threading import getCollectionManager
 
@@ -448,6 +451,7 @@ class SyncApp(object):
 
         return data
 
+    # 上传collection数据库
     def operation_upload(self, col, data, session):
         # Verify integrity of the received database file before replacing our
         # existing db.
@@ -478,6 +482,7 @@ class SyncApp(object):
 
         return True
 
+    #下载collection数据库
     def operation_download(self, col, session):
         # run hook_download if one is defined
         if self.hook_download is not None:
@@ -490,8 +495,10 @@ class SyncApp(object):
             col.reopen()
         return data
 
+    #@wsgi装饰器，WSGI收到请求后调用这个接口。
     @wsgify
     def __call__(self, req):
+        # 根据hkey或skey取回服务器保存的会话上下文，如果没有则新建，表示一次新的会话开始。
         # Get and verify the session
         try:
             hkey = req.POST['k']
@@ -507,11 +514,13 @@ class SyncApp(object):
             except KeyError:
                 skey = None
 
+        # 数据是否有压缩
         try:
             compression = int(req.POST['c'])
         except KeyError:
             compression = 0
 
+        # 读取数据并解压数据到data
         try:
             data = req.POST['data'].file.read()
             data = self._decode_data(data, compression)
@@ -521,11 +530,13 @@ class SyncApp(object):
             # Bad JSON
             raise HTTPBadRequest()
 
+        # 请求的url是以base_url开始的，表示同步牌组。
         if req.path.startswith(self.base_url):
             url = req.path[len(self.base_url):]
             if url not in self.valid_urls:
                 raise HTTPNotFound()
 
+            # 过时的命令
             if url == 'getDecks':
                 # This is an Anki 1.x client! Tell them to upgrade.
                 import zlib, logging
@@ -538,6 +549,7 @@ class SyncApp(object):
                     content_encoding='deflate',
                     body=zlib.compress(json.dumps({'status': 'oldVersion'})))
 
+            # hostKey 命令，服务器验证用户名和密码，成功返回key给客户端。
             if url == 'hostKey':
                 try:
                     u = data['u']
@@ -574,17 +586,20 @@ class SyncApp(object):
 
                 thread = session.get_thread()
 
+                # 执行同步开始前的hook，如果有的话。
                 # run hook_pre_sync if one is defined
                 if url == 'start':
                     if self.hook_pre_sync is not None:
                         thread.execute(self.hook_pre_sync, [session])
 
+                # 命令处理
                 result = self._execute_handler_method_in_thread(url, data, session)
 
                 # If it's a complex data type, we convert it to JSON
                 if type(result) not in (str, unicode):
                     result = json.dumps(result)
 
+                # 执行同步结束后的hook，如果有的话。
                 if url == 'finish':
                     # TODO: Apparently 'finish' isn't when we're done because 'mediaList' comes
                     #       after it... When can we possibly delete the session?
@@ -599,6 +614,7 @@ class SyncApp(object):
                     content_type='application/json',
                     body=result)
 
+            # 上传整个collectiion数据库文件
             elif url == 'upload':
                 thread = session.get_thread()
                 result = thread.execute(self.operation_upload, [data['data'], session])
@@ -607,6 +623,7 @@ class SyncApp(object):
                     content_type='text/plain',
                     body='OK' if result else 'Error')
 
+            # 下载整个collectiion数据库文件
             elif url == 'download':
                 thread = session.get_thread()
                 result = thread.execute(self.operation_download, [session])
@@ -618,6 +635,7 @@ class SyncApp(object):
             # This was one of our operations but it didn't get handled... Oops!
             raise HTTPInternalServerError()
 
+        # 请求的url是以base_media_url开始的，表示同步媒体文件。
         # media sync
         elif req.path.startswith(self.base_media_url):
             if session is None:
@@ -635,6 +653,7 @@ class SyncApp(object):
 
         return Response(status='200 OK', content_type='text/plain', body='Anki Sync Server')
 
+    #在线程中处理命令。
     @staticmethod
     def _execute_handler_method_in_thread(method_name, keyword_args, session):
         """
@@ -644,6 +663,7 @@ class SyncApp(object):
         """
 
         def run_func(col):
+            # 根据命令名找出对应的处理函数
             # Retrieve the correct handler method.
             handler = session.get_handler_for_operation(method_name, col)
             handler_method = getattr(handler, method_name)
