@@ -306,6 +306,7 @@ class SyncUserSession(object):
     def get_thread(self):
         return self.collection_manager.get_collection(self.get_collection_path(), self.setup_new_collection)
 
+    # 返回有operation方法的同步类实例
     def get_handler_for_operation(self, operation, col):
         if operation in SyncCollectionHandler.operations:
             cache_name, handler_class = 'collection_handler', SyncCollectionHandler
@@ -663,13 +664,15 @@ class SyncApp(object):
         """
 
         def run_func(col):
-            # 根据命令名找出对应的处理函数
+            # 根据方法名得到对应的同步类实例中的方法。
             # Retrieve the correct handler method.
             handler = session.get_handler_for_operation(method_name, col)
             handler_method = getattr(handler, method_name)
 
+            # 执行
             res = handler_method(**keyword_args)
 
+            # 保存collection，返回执行结果。
             col.save()
             return res
 
